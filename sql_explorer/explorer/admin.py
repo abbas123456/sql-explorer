@@ -21,47 +21,49 @@ column_mapping = {
     TIMESTAMP: 'date'
 }
 
-schemas = insp.get_schema_names()
-raw_tables = {}
-for schema in schemas:
+schemas = {}
+
+for schema in insp.get_schema_names():
     if schema in ['pg_toast', 'pg_temp_1', 'pg_toast_temp_1', 'pg_catalog', 'information_schema', 'public']:
         continue
-    raw_tables = {x: [] for x in insp.get_table_names(schema=schema)}
 
-tables = {}
-for table_name in raw_tables.keys():
-    columns = insp.get_columns(table_name, schema=schema)
-    tables[table_name[9:]] = [{'name': x['name'], 'data_type': column_mapping[type(x['type'])]} for x in columns if x != 'id']
+    schemas[schema] = {}
+    for table in insp.get_table_names(schema=schema):
+        columns = insp.get_columns(table, schema=schema)
+        schemas[schema][table] = [{'name': x['name'], 'data_type': column_mapping[type(x['type'])]} for x in columns if x != 'id']
 
 try:
-    for table_name, columns in tables.items():
-        try:
-            model = ModelSchema.objects.get(name=table_name)
-        except ModelSchema.DoesNotExist:
-            model = ModelSchema.objects.create(name=table_name)
-
-        for column in columns:
-            if column['name'] == 'id':
-                continue
+    for schema, tables in schemas.items():
+        for table_name, columns in tables.items():
             try:
-                field = FieldSchema.objects.get(name=column['name'])
-            except FieldSchema.DoesNotExist:
-                field = FieldSchema.objects.create(
-                    name=column['name'], data_type=column['data_type']
-                )
+                model = ModelSchema.objects.get(name=table_name)
+            except ModelSchema.DoesNotExist:
+                model = ModelSchema.objects.create(name=table_name)
 
-            try:
-                model.add_field(field)
-            except:
-                pass
+            for column in columns:
+                if column['name'] == 'id':
+                    continue
+                try:
+                    field = FieldSchema.objects.get(name=column['name'])
+                except FieldSchema.DoesNotExist:
+                    field = FieldSchema.objects.create(
+                        name=column['name'], data_type=column['data_type']
+                    )
 
-        Model = model.as_model()
-        Admin = type(table_name, (admin.ModelAdmin,), dict(
-            list_filter=tuple([(x.name,DropdownFilter) for x in Model._meta.fields if x.name != 'id']),
-            list_display=tuple([x.name for x in Model._meta.fields if x.name != 'id']),
-            search_fields=tuple([x.name for x in Model._meta.fields if x.name != 'id'])
-        ))
-        admin.site.register(Model, Admin)
+                try:
+                    model.add_field(field)
+                except:
+                    pass
+
+            Model = model.as_model()
+            Model._meta.db_table = schema + '"."' + Model._meta.db_table.replace('explorer_', '')
+
+            Admin = type(table_name, (admin.ModelAdmin,), dict(
+                list_filter=tuple([(x.name,DropdownFilter) for x in Model._meta.fields if x.name != 'id']),
+                list_display=tuple([x.name for x in Model._meta.fields if x.name != 'id']),
+                search_fields=tuple([x.name for x in Model._meta.fields if x.name != 'id'])
+            ))
+            admin.site.register(Model, Admin)
 
 except:
     pass
